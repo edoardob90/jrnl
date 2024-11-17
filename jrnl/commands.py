@@ -76,7 +76,17 @@ def postconfig_import(args: argparse.Namespace, config: dict, **_) -> int:
     journal = open_journal(args.journal_name, config)
 
     format = args.export if args.export else "jrnl"
-    get_importer(format).import_(journal, args.filename)
+
+    if (importer := get_importer(format)) is None:
+        raise JrnlException(
+            Message(
+                MsgText.ImporterNotFound,
+                MsgStyle.ERROR,
+                {"format": format},
+            )
+        )
+
+    importer.import_(journal, args.filename)
 
     return 0
 

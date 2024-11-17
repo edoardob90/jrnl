@@ -266,6 +266,11 @@ class MsgText(Enum):
         {count} imported to {journal_name} journal
         """
 
+    ImporterNotFound = """
+        No importer found for file type '{format}'.
+        '{format}' is likely to be an export-only format.
+        """
+
     # --- Color --- #
     InvalidColor = "{key} set to invalid color: {color}"
 

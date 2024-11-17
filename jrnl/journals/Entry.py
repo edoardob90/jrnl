@@ -228,4 +228,4 @@ def split_title(text: str) -> tuple[str, str]:
         sep = SENTENCE_SPLITTER.search(text)
         if not sep:
             return text, ""
-    return text[: sep.end()].strip(), text[sep.end() :].strip()
+    return text[: sep.end()].strip(), text[sep.end() :].rstrip()

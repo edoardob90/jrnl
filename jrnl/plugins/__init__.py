@@ -5,6 +5,7 @@ from typing import Type
 
 from jrnl.plugins.calendar_heatmap_exporter import CalendarHeatmapExporter
 from jrnl.plugins.dates_exporter import DatesExporter
+from jrnl.plugins.dayone_json_importer import DayOneJSONImporter
 from jrnl.plugins.fancy_exporter import FancyExporter
 from jrnl.plugins.jrnl_importer import JRNLImporter
 from jrnl.plugins.json_exporter import JSONExporter
@@ -25,11 +26,12 @@ __exporters = [
     XMLExporter,
     YAMLExporter,
 ]
-__importers = [JRNLImporter]
+__importers = [JRNLImporter, DayOneJSONImporter]
 
 __exporter_types = {name: plugin for plugin in __exporters for name in plugin.names}
 __exporter_types["pretty"] = None
 __exporter_types["short"] = None
+__exporter_types["dayone"] = None
 __importer_types = {name: plugin for plugin in __importers for name in plugin.names}
 
 EXPORT_FORMATS = sorted(__exporter_types.keys())

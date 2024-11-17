@@ -1,13 +1,10 @@
 # Copyright © 2012-2023 jrnl contributors
 # License: https://www.gnu.org/licenses/gpl-3.0.html
 
-from enum import Enum
+from jrnl.messages.MsgTextBase import MsgTextBase
 
 
-class MsgText(Enum):
-    def __str__(self) -> str:
-        return self.value
-
+class MsgText(MsgTextBase):
     # -- Welcome --- #
     WelcomeToJrnl = """
         Welcome to jrnl {version}!

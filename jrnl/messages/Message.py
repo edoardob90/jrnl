@@ -8,10 +8,10 @@ from typing import NamedTuple
 from jrnl.messages.MsgStyle import MsgStyle
 
 if TYPE_CHECKING:
-    from jrnl.messages.MsgText import MsgText
+    from jrnl.messages.MsgTextBase import MsgTextBase
 
 
 class Message(NamedTuple):
-    text: "MsgText"
+    text: "MsgTextBase"
     style: MsgStyle = MsgStyle.NORMAL
     params: Mapping = {}

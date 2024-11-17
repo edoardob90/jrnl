@@ -2,11 +2,13 @@
 # License: https://www.gnu.org/licenses/gpl-3.0.html
 
 import json
+import re
 import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Dict
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -36,6 +38,62 @@ def localize(date: datetime, tz: Optional[str]) -> datetime:
     return date.astimezone(ZoneInfo(tz.replace("\\", "")))
 
 
+class LinkResolver:
+    """Handles Day One entry link resolution"""
+
+    def __init__(self, journal_root: Path):
+        self.journal_root = journal_root
+        # Simple mapping of UUIDs to file paths
+        self.uuid_index: Dict[str, Path] = {}
+        # Regex for Day One links
+        self.link_pattern = re.compile(
+            r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)"
+        )
+
+    def _get_file_path(self, date: datetime) -> Path:
+        """Convert date to journal file path"""
+        return (
+            self.journal_root
+            / str(date.year)
+            / f"{date.month:02d}"
+            / f"{date.day:02d}.txt"
+        )
+
+    def index_entries(self, entries: list[dict]) -> None:
+        """Build UUID index from Day One entries."""
+        for entry in entries:
+            uuid = entry.get("uuid")
+            if not uuid:
+                continue
+
+            date = datetime.fromisoformat(entry["creationDate"].replace("Z", "+00:00"))
+
+            self.uuid_index[uuid] = self._get_file_path(date)
+
+    def resolve_links(self, text: str) -> str:
+        """
+        Convert Day One links to simple file references.
+        Example:
+        [Link text](dayone2://view?Id=1234-5678)
+        becomes:
+        [Link text](2024/11/16.txt)
+        """
+
+        def replace_link(match: re.Match) -> str:
+            link_text, uuid = match.groups()
+
+            target = self.uuid_index.get(uuid)
+            if not target:
+                return match.group(0)  # Keep original if UUID not found
+
+            # Create relative path from journal root
+            rel_path = target.relative_to(self.journal_root)
+
+            return f"[[{rel_path}|{link_text}]]"
+
+        return self.link_pattern.sub(replace_link, text)
+
+
 class DayOneMsgText(MsgTextBase):
     """Messages specific to Day One import functionality."""
 
@@ -62,7 +120,7 @@ class DayOneJSONImporter:
     names = ["dayone"]
 
     @staticmethod
-    def _convert_entry_to_jrnl_format(entry: dict[str, Any], base_path: Path) -> str:
+    def _convert(entry: dict[str, Any], base_path: Path) -> str:
         """Convert a Day One entry to jrnl format.
 
         Args:
@@ -198,6 +256,10 @@ class DayOneJSONImporter:
                 )
             )
 
+        # Index entries
+        resolver = LinkResolver(journal.config["journal"])
+        resolver.index_entries(data["entries"])
+
         # Verify media files exist
         media_types = {"photos": "photos", "pdfAttachments": "pdfs", "audios": "audios"}
         media_count = 0
@@ -230,6 +292,7 @@ class DayOneJSONImporter:
 
         old_cnt = len(journal.entries)
         total_entries = len(data["entries"])
+
         entries_text = []
 
         # Process entries with status updates
@@ -241,11 +304,12 @@ class DayOneJSONImporter:
                     {"current": i, "total": total_entries},
                 )
             )
-            entries_text.append(
-                DayOneJSONImporter._convert_entry_to_jrnl_format(
-                    entry, input_path.parent
-                )
+            # Resolve any links in the entry
+            entry_text = resolver.resolve_links(
+                DayOneJSONImporter._convert(entry, input_path.parent)
             )
+            # Add entry to journal
+            entries_text.append(entry_text)
 
         # Import all entries
         journal.import_("\n\n".join(entries_text))

@@ -8,9 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import Dict
-from typing import Optional
-from zoneinfo import ZoneInfo
 
 from jrnl.exception import JrnlException
 from jrnl.messages import Message
@@ -18,83 +15,14 @@ from jrnl.messages import MsgStyle
 from jrnl.messages import MsgText
 from jrnl.messages import MsgTextBase
 from jrnl.output import print_msg
+from jrnl.plugins.dayone_index import DayOneIndex
+from jrnl.plugins.util import localize
 
 if TYPE_CHECKING:
     from jrnl.journals import Journal
 
 
-def localize(date: datetime, tz: Optional[str]) -> datetime:
-    """Returns a localized `datetime` object
-
-    Args:
-        date: a `datetime` object
-        tz: an (optional) time-zone string
-
-    Returns:
-        A copy of `date` localized to `tz`
-    """
-    if not tz:
-        return date
-    return date.astimezone(ZoneInfo(tz.replace("\\", "")))
-
-
-class LinkResolver:
-    """Handles Day One entry link resolution"""
-
-    def __init__(self, journal_root: Path):
-        self.journal_root = journal_root
-        # Simple mapping of UUIDs to file paths
-        self.uuid_index: Dict[str, Path] = {}
-        # Regex for Day One links
-        self.link_pattern = re.compile(
-            r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)"
-        )
-
-    def _get_file_path(self, date: datetime) -> Path:
-        """Convert date to journal file path"""
-        return (
-            self.journal_root
-            / str(date.year)
-            / f"{date.month:02d}"
-            / f"{date.day:02d}.txt"
-        )
-
-    def index_entries(self, entries: list[dict]) -> None:
-        """Build UUID index from Day One entries."""
-        for entry in entries:
-            uuid = entry.get("uuid")
-            if not uuid:
-                continue
-
-            date = datetime.fromisoformat(entry["creationDate"].replace("Z", "+00:00"))
-
-            self.uuid_index[uuid] = self._get_file_path(date)
-
-    def resolve_links(self, text: str) -> str:
-        """
-        Convert Day One links to simple file references.
-        Example:
-        [Link text](dayone2://view?Id=1234-5678)
-        becomes:
-        [Link text](2024/11/16.txt)
-        """
-
-        def replace_link(match: re.Match) -> str:
-            link_text, uuid = match.groups()
-
-            target = self.uuid_index.get(uuid)
-            if not target:
-                return match.group(0)  # Keep original if UUID not found
-
-            # Create relative path from journal root
-            rel_path = target.relative_to(self.journal_root)
-
-            return f"[[{rel_path}|{link_text}]]"
-
-        return self.link_pattern.sub(replace_link, text)
-
-
-class DayOneMsgText(MsgTextBase):
+class DayOneMsg(MsgTextBase):
     """Messages specific to Day One import functionality."""
 
     NoInputPath = "Day One JSON import requires an input file path"
@@ -132,7 +60,9 @@ class DayOneJSONImporter:
         """
         # Convert creation date to local time (Day One uses UTC)
         date = datetime.fromisoformat(entry["creationDate"].replace("Z", "+00:00"))
-        date = localize(date, entry.get("timeZone"))
+        if tz := entry.get("timeZone"):
+            tz = tz.replace("\\", "")
+            date = localize(date, tz)
         date_str = f"[{date.strftime('%Y-%m-%d %H:%M:%S %p')}]"
 
         # Cleanup entry text from spurious escape sequences
@@ -211,8 +141,7 @@ class DayOneJSONImporter:
             lines.append(metatada_str)
 
         if text:
-            lines.append("")
-            lines.append(text.strip())
+            lines.extend(["", text.strip()])
 
         return "\n".join(lines)
 
@@ -231,7 +160,7 @@ class DayOneJSONImporter:
             None. Prints a Message indicating the import results
         """
         if not input:
-            raise JrnlException(Message(DayOneMsgText.NoInputPath, MsgStyle.ERROR))
+            raise JrnlException(Message(DayOneMsg.NoInputPath, MsgStyle.ERROR))
 
         input_path = Path(input)
         if not input_path.exists():
@@ -244,21 +173,20 @@ class DayOneJSONImporter:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             raise JrnlException(
-                Message(DayOneMsgText.InvalidJSON, MsgStyle.ERROR, {"error": str(e)})
+                Message(DayOneMsg.InvalidJSON, MsgStyle.ERROR, {"error": str(e)})
             )
 
         if "entries" not in data:
             raise JrnlException(
                 Message(
-                    DayOneMsgText.InvalidExport,
+                    DayOneMsg.InvalidExport,
                     MsgStyle.ERROR,
                     {"reason": "no entries found"},
                 )
             )
 
         # Index entries
-        resolver = LinkResolver(journal.config["journal"])
-        resolver.index_entries(data["entries"])
+        index = DayOneIndex()
 
         # Verify media files exist
         media_types = {"photos": "photos", "pdfAttachments": "pdfs", "audios": "audios"}
@@ -273,7 +201,7 @@ class DayOneJSONImporter:
                     if not media_path.exists():
                         print_msg(
                             Message(
-                                DayOneMsgText.MediaNotFound,
+                                DayOneMsg.MediaNotFound,
                                 MsgStyle.WARNING,
                                 {"path": str(media_path)},
                             )
@@ -284,7 +212,7 @@ class DayOneJSONImporter:
         if media_count > 0:
             print_msg(
                 Message(
-                    DayOneMsgText.MediaProcessed,
+                    DayOneMsg.MediaProcessed,
                     MsgStyle.NORMAL,
                     {"count": media_count},
                 )
@@ -293,21 +221,41 @@ class DayOneJSONImporter:
         old_cnt = len(journal.entries)
         total_entries = len(data["entries"])
 
-        entries_text = []
+        # Setup index for resolving links
+        index = DayOneIndex()
+
+        def resolve_links(text: str) -> str:
+            """Resolve Day One links in the text."""
+            link_re = re.compile(r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)")
+
+            def replace_link(match: re.Match) -> str:
+                link_text, entry_uuid = match.groups()
+
+                target = index[entry_uuid]
+                if not target:
+                    return match.group(0)
+
+                return f"[[{target.journal_name}/{target.date:%Y/%m/%d}|{link_text}]]"
+
+            return link_re.sub(replace_link, text)
 
         # Process entries with status updates
+        entries_text = []
         for i, entry in enumerate(data["entries"], 1):
             print_msg(
                 Message(
-                    DayOneMsgText.ProcessingEntry,
+                    DayOneMsg.ProcessingEntry,
                     MsgStyle.NORMAL,
                     {"current": i, "total": total_entries},
                 )
             )
+
+            # Convert entry
+            entry_text = DayOneJSONImporter._convert(entry, input_path.parent)
             # Resolve any links in the entry
-            entry_text = resolver.resolve_links(
-                DayOneJSONImporter._convert(entry, input_path.parent)
-            )
+            if entry_text:
+                entry_text = resolve_links(entry_text)
+
             # Add entry to journal
             entries_text.append(entry_text)
 

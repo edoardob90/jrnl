@@ -16,9 +16,11 @@ avoid any possible overhead for these standalone commands.
 """
 
 import argparse
+import json
 import logging
 import platform
 import sys
+from pathlib import Path
 
 from jrnl.config import cmd_requires_valid_journal_name
 from jrnl.exception import JrnlException
@@ -26,6 +28,10 @@ from jrnl.messages import Message
 from jrnl.messages import MsgStyle
 from jrnl.messages import MsgText
 from jrnl.output import print_msg
+from jrnl.plugins.dayone_index import DayOneIndex
+from jrnl.plugins.dayone_index import DayOneIndexMsg
+from jrnl.plugins.dayone_index import IndexMode
+from jrnl.plugins.dayone_json_importer import DayOneMsg
 
 
 def preconfig_diagnostic(_) -> None:
@@ -168,5 +174,63 @@ def postconfig_decrypt(
             original_config, {"encrypt": False}, args.journal_name, force_local=True
         )
         save_config(original_config)
+
+    return 0
+
+
+@cmd_requires_valid_journal_name
+def postconfig_index(args: argparse.Namespace, config: dict, **kwargs) -> int:
+    """
+    Standalone command to build/update the Day One index
+    """
+    # Initialize the index
+    index = DayOneIndex(mode=IndexMode.BUILD)
+
+    # Check if --clear flag is set
+    if args.clear:
+        index.clear()
+        print_msg(Message(DayOneIndexMsg.IndexCleared, MsgStyle.NORMAL))
+        return 0
+
+    if not args.filename:
+        raise JrnlException(
+            Message(
+                DayOneIndexMsg.IndexFileMissing,
+                MsgStyle.ERROR,
+            )
+        )
+
+    # Load and process Day One JSON file
+    input_path = Path(args.filename)
+    if not input_path.exists():
+        raise JrnlException(
+            Message(
+                DayOneIndexMsg.IndexFileNotFound,
+                MsgStyle.ERROR,
+                {"path": input_path},
+            )
+        )
+
+    with open(input_path, "r") as f:
+        data = json.load(f)
+
+    if "entries" not in data:
+        raise JrnlException(
+            Message(
+                DayOneMsg.InvalidExport,
+                MsgStyle.ERROR,
+                {"reason": "no.entries found"},
+            )
+        )
+
+    # Update the index
+    index.add_entries(data["entries"], args.journal_name, input_path)
+
+    msg = (
+        DayOneIndexMsg.IndexCreated
+        if len(index) == len(data["entries"])
+        else DayOneIndexMsg.IndexUpdated
+    )
+    print_msg(Message(msg, MsgStyle.NORMAL, {"count": len(index.entries)}))
 
     return 0

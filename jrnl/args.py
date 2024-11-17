@@ -8,6 +8,7 @@ import textwrap
 from jrnl.commands import postconfig_decrypt
 from jrnl.commands import postconfig_encrypt
 from jrnl.commands import postconfig_import
+from jrnl.commands import postconfig_index
 from jrnl.commands import postconfig_list
 from jrnl.commands import preconfig_diagnostic
 from jrnl.commands import preconfig_version
@@ -186,6 +187,29 @@ def parse_args(args: list[str] = []) -> argparse.Namespace:
         default=None,
     )
     standalone.add_argument("-i", dest="filename", help=argparse.SUPPRESS)
+    standalone.add_argument(
+        "--index",
+        action="store_const",
+        const=postconfig_index,
+        dest="postconfig_cmd",
+        help="""
+        Build or update UUID index for Day One entries.
+
+        Required parameters:
+
+        --file FILENAME (path to Day One JSON export)
+
+        Optional parameters:
+
+        --clear (reset the index)
+        """,
+    )
+    standalone.add_argument(
+        "--clear",
+        dest="clear",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
 
     compose_msg = """
     To add a new entry into your journal, simply write it on the command line:

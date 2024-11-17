@@ -2,7 +2,10 @@
 # License: https://www.gnu.org/licenses/gpl-3.0.html
 
 from collections import Counter
+from datetime import datetime
 from typing import TYPE_CHECKING
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from jrnl.journals import Journal
@@ -61,3 +64,18 @@ def get_journal_frequency_one_level(journal: "Journal") -> Counter:
         date = str(entry.date.date())
         date_counts[date] += 1
     return date_counts
+
+
+def localize(date: datetime, tz: Optional[str]) -> datetime:
+    """Returns a localized `datetime` object
+
+    Args:
+        date: a `datetime` object
+        tz: an (optional) time-zone string
+
+    Returns:
+        A copy of `date` localized to `tz`
+    """
+    if not tz:
+        return date
+    return date.astimezone(ZoneInfo(tz))

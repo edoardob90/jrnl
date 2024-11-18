@@ -15,7 +15,9 @@ from jrnl.messages import MsgText
 from jrnl.messages import MsgTextBase
 from jrnl.output import print_msg
 from jrnl.plugins.dayone_index import DayOneIndex
+from jrnl.plugins.dayone_index import DayOneIndexMsg
 from jrnl.plugins.util import localize
+from jrnl.prompt import yesno
 
 if TYPE_CHECKING:
     from jrnl.journals import Journal
@@ -30,6 +32,7 @@ class DayOneMsg(MsgTextBase):
     MediaNotFound = "Media file not found at {path}"
     MediaProcessed = "Successfully processed {count} media files from Day One export"
     ProcessingEntry = "Processing Day One entry {current} of {total}"
+    Continue = "Do you want to continue importing entries from Day One?"
 
 
 class DayOneJSONImporter:
@@ -216,6 +219,13 @@ class DayOneJSONImporter:
 
         # Setup index for resolving links
         index = DayOneIndex()
+
+        # Check if the index is up-to-date
+        if index.last_modified.timestamp() < input_path.stat().st_ctime:
+            print_msg(Message(DayOneIndexMsg.IndexOutdated, MsgStyle.WARNING))
+            proceed = yesno(Message(DayOneMsg.Continue), default=False)
+            if not proceed:
+                return None
 
         # Process entries with status updates
         old_cnt = len(journal.entries)

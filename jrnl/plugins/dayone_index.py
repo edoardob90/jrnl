@@ -49,6 +49,7 @@ class DayOneIndexMsg(MsgTextBase):
     IndexCreated = "Day One index created from {count} entries"
     IndexUpdated = "Day One index updated ({count} entries)"
     IndexUpToDate = "Day One index is up-to-date"
+    IndexOutdated = "Day One index is outdated. Run 'jrnl --index' to update"
     IndexClearConfirm = "Do you want to clear the Day One index?"
     IndexCleared = "Day One index cleared"
     IndexNotUsable = (

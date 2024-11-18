@@ -5,12 +5,33 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict
 from typing import Optional
+from urllib.parse import unquote
 
+from jrnl.exception import JrnlException
 from jrnl.messages import Message
 from jrnl.messages import MsgStyle
 from jrnl.messages import MsgTextBase
 from jrnl.output import print_msg
 from jrnl.plugins.util import localize
+
+
+def extract_journal_name(export_path: Path) -> str:
+    """
+    Extract original journal name from Day One export filename.
+
+    Args:
+        export_path: Path to the Day One JSON export file
+
+    Returns:
+        The original journal name with proper Unicode decoding
+
+    Example:
+        >>> extract_journal_name(Path("🧪 Test 2.json"))
+        '🧪 Test 2'
+        >>> extract_journal_name(Path("%F0%9F%A7%AA Test 2.json"))
+        '🧪 Test 2'
+    """
+    return unquote(export_path.stem)
 
 
 class DayOneIndexMsg(MsgTextBase):
@@ -28,6 +49,7 @@ class DayOneIndexMsg(MsgTextBase):
         "Cannot resolve Day One links: index not found or empty. "
         "Run 'jrnl --index --file path/to/dayone.json' first"
     )
+    InvalidJournalName = "Journal name '{name}' is not a valid UTF-8 string"
 
 
 class IndexMode(Enum):
@@ -39,12 +61,24 @@ class IndexMode(Enum):
 
 @dataclass(eq=False, frozen=True)
 class IndexedEntry:
-    """Information about a Day One entry needed for link resolution"""
+    """Entry stored in a Day One index file"""
 
     uuid: str
     date: datetime
     journal_name: str
-    export_source: str  # Original Day One JSON file
+    original_journal_name: str  # Original Day One journal name
+
+    def __post_init__(self):
+        try:
+            self.original_journal_name.encode("utf-8").decode("utf-8")
+        except UnicodeError:
+            raise JrnlException(
+                Message(
+                    DayOneIndexMsg.InvalidJournalName,
+                    MsgStyle.ERROR,
+                    {"name": self.original_journal_name},
+                )
+            )
 
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, IndexedEntry):
@@ -56,7 +90,7 @@ class IndexedEntry:
 
 
 class DayOneIndex:
-    """Maintains a persistent index of Day One entry UUIDs across multiple exports"""
+    """Persistent index of Day One entry UUIDs across multiple exports and journals"""
 
     def __init__(self, mode: IndexMode = IndexMode.USE):
         from jrnl.path import get_config_path
@@ -80,7 +114,7 @@ class DayOneIndex:
             return
 
         try:
-            with open(self.index_file, "r") as f:
+            with self.index_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
             self.entries = {
@@ -88,7 +122,7 @@ class DayOneIndex:
                     uuid=uuid,
                     date=datetime.fromisoformat(entry["date"]),
                     journal_name=entry["journal_name"],
-                    export_source=entry["export_source"],
+                    original_journal_name=entry["orignal_journal_name"],
                 )
                 for uuid, entry in data.items()
             }
@@ -102,13 +136,13 @@ class DayOneIndex:
             uuid: {
                 "date": entry.date.isoformat(),
                 "journal_name": entry.journal_name,
-                "export_source": entry.export_source,
+                "orignal_journal_name": entry.original_journal_name,
             }
             for uuid, entry in self.entries.items()
         }
 
-        with open(self.index_file, "w") as f:
-            json.dump(data, f, indent=2)
+        with self.index_file.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
     def clear(self) -> None:
         """Clear the index"""
@@ -116,7 +150,7 @@ class DayOneIndex:
         self._save_index()
 
     def add_entries(
-        self, entries: list[dict], journal_name: str, export_source: Path
+        self, entries: list[dict], journal_name: str, export_journal_source: Path
     ) -> None:
         """
         Add entries from a Day One export to the index
@@ -126,6 +160,8 @@ class DayOneIndex:
             journal_name: Unique name of the journal these entries belong to
             export_source: Path to the Day One JSON export file
         """
+        orignal_journal_name = extract_journal_name(export_journal_source)
+
         new_entries = False
         for entry in entries:
             uuid = entry.get("uuid")
@@ -141,7 +177,7 @@ class DayOneIndex:
                 uuid=uuid,
                 date=date,
                 journal_name=journal_name,
-                export_source=str(export_source),
+                original_journal_name=orignal_journal_name,
             )
 
             new_entries = True

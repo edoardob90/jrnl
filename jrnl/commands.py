@@ -211,7 +211,7 @@ def postconfig_index(args: argparse.Namespace, config: dict, **kwargs) -> int:
             )
         )
 
-    with open(input_path, "r") as f:
+    with input_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
     if "entries" not in data:

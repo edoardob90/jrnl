@@ -57,6 +57,7 @@ class DayOneIndexMsg(MsgTextBase):
         "Run 'jrnl --index --file path/to/dayone.json' first"
     )
     InvalidJournalName = "Journal name '{name}' is not a valid UTF-8 string"
+    Continue = "Do you want to continue?"
 
 
 class IndexMode(Enum):
@@ -105,7 +106,7 @@ class DayOneIndex:
         config_dir = Path(get_config_path()).parent
         self.index_file = config_dir / "dayone_index.json"
         self.entries: Dict[str, IndexedEntry] = {}
-        self.last_modified: datetime = datetime.min
+        self.last_modified: datetime = datetime.fromtimestamp(0)
         self.mode = mode
         self._load_index()
 
@@ -129,11 +130,16 @@ class DayOneIndex:
         if not self.index_file.exists():
             if self.mode == IndexMode.USE:
                 print_msg(Message(DayOneIndexMsg.IndexNotFound, MsgStyle.WARNING))
+                proceed = yesno(Message(DayOneIndexMsg.Continue), default=False)
+                if not proceed:
+                    raise KeyboardInterrupt
             return
 
         try:
             with self.index_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            self.last_modified = datetime.fromisoformat(data["last_modified"])
 
             self.entries = {
                 uuid: IndexedEntry(
@@ -149,7 +155,7 @@ class DayOneIndex:
                 Message(
                     DayOneIndexMsg.IndexFileMalformed,
                     MsgStyle.ERROR,
-                    {"error": str(e)},
+                    {"error": f"{type(e).__name__}: {str(e)}"},
                 )
             ) from e
         except Exception as e:
@@ -240,7 +246,7 @@ class DayOneIndex:
 
     def resolve_links(self, text: str) -> str:
         """Resolve Day One links in the given text"""
-        link_re = re.compile(r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)")
+        link_re = re.compile(r"\[([^\]]+)\]\(dayone://view\?entryId=([a-zA-Z0-9-]+)\)")
 
         def replace_link(match: re.Match) -> str:
             link_text, entry_uuid = match.groups()

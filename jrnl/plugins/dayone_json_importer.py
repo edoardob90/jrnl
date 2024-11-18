@@ -218,14 +218,22 @@ class DayOneJSONImporter:
             )
 
         # Setup index for resolving links
-        index = DayOneIndex()
-
-        # Check if the index is up-to-date
-        if index.last_modified.timestamp() < input_path.stat().st_ctime:
-            print_msg(Message(DayOneIndexMsg.IndexOutdated, MsgStyle.WARNING))
-            proceed = yesno(Message(DayOneMsg.Continue), default=False)
-            if not proceed:
-                return None
+        try:
+            index = DayOneIndex()
+        except KeyboardInterrupt:
+            print_msg(Message(MsgText.ImportAborted, MsgStyle.WARNING))
+            return None
+        else:
+            # Check if the index is up-to-date
+            if (
+                index.is_usable
+                and index.last_modified.timestamp() < input_path.stat().st_ctime
+            ):
+                print_msg(Message(DayOneIndexMsg.IndexOutdated, MsgStyle.WARNING))
+                proceed = yesno(Message(DayOneMsg.Continue), default=False)
+                if not proceed:
+                    print_msg(Message(MsgText.ImportAborted, MsgStyle.WARNING))
+                    return None
 
         # Process entries with status updates
         old_cnt = len(journal.entries)
@@ -246,7 +254,7 @@ class DayOneJSONImporter:
             # Resolve any links in the entry
             if entry_text:
                 entry_text = index.resolve_links(entry_text)
-
+                print(entry_text)
                 # Add entry to journal
                 entries_text.append(entry_text)
 

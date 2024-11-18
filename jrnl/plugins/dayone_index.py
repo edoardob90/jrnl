@@ -48,6 +48,7 @@ class DayOneIndexMsg(MsgTextBase):
     )
     IndexCreated = "Day One index created from {count} entries"
     IndexUpdated = "Day One index updated ({count} entries)"
+    IndexUpToDate = "Day One index is up-to-date"
     IndexClearConfirm = "Do you want to clear the Day One index?"
     IndexCleared = "Day One index cleared"
     IndexNotUsable = (
@@ -197,7 +198,8 @@ class DayOneIndex:
         """
         orignal_journal_name = extract_journal_name(export_journal_source)
 
-        new_entries = False
+        entries_count_before = len(self)
+
         for entry in entries:
             uuid = entry.get("uuid")
             if not uuid or uuid in self.entries:
@@ -215,11 +217,25 @@ class DayOneIndex:
                 original_journal_name=orignal_journal_name,
             )
 
-            new_entries = True
+        entries_count_after = len(self)
 
-        if new_entries:
+        is_created = entries_count_before == 0
+        is_updated = entries_count_after > entries_count_before
+
+        if is_created or is_updated:
             self.last_modified = datetime.now()
             self._save_index()
+
+            if is_created:
+                msg = DayOneIndexMsg.IndexCreated
+                count = entries_count_after
+            else:
+                msg = DayOneIndexMsg.IndexUpdated
+                count = entries_count_after - entries_count_before
+
+            print_msg(Message(msg, MsgStyle.NORMAL, {"count": count}))
+        else:
+            print_msg(Message(DayOneIndexMsg.IndexUpToDate, MsgStyle.NORMAL))
 
     def resolve_links(self, text: str) -> str:
         """Resolve Day One links in the given text"""

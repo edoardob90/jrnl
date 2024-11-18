@@ -14,6 +14,7 @@ from jrnl.messages import MsgStyle
 from jrnl.messages import MsgTextBase
 from jrnl.output import print_msg
 from jrnl.plugins.util import localize
+from jrnl.prompt import yesno
 
 
 def extract_journal_name(export_path: Path) -> str:
@@ -47,6 +48,7 @@ class DayOneIndexMsg(MsgTextBase):
     )
     IndexCreated = "Day One index created from {count} entries"
     IndexUpdated = "Day One index updated ({count} entries)"
+    IndexClearConfirm = "Do you want to clear the Day One index?"
     IndexCleared = "Day One index cleared"
     IndexNotUsable = (
         "Cannot resolve Day One links: index not found or empty. "
@@ -176,8 +178,11 @@ class DayOneIndex:
 
     def clear(self) -> None:
         """Clear the index"""
-        self.entries = {}
-        self._save_index()
+        clear = yesno(Message(DayOneIndexMsg.IndexClearConfirm), default=False)
+        if clear:
+            self.last_modified = datetime.now()
+            self.entries = {}
+            self._save_index()
 
     def add_entries(
         self, entries: list[dict], journal_name: str, export_journal_source: Path

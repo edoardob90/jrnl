@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -39,6 +40,8 @@ class DayOneIndexMsg(MsgTextBase):
 
     IndexFileMissing = "Creating a Day One index requires an input file"
     IndexFileNotFound = "Day One index file {path} does not exist"
+    IndexFileMalformed = "Cannot parse Day One index file: {error}"
+    IndexLoadError = "Cannot load Day One index: {error}"
     IndexNotFound = (
         "No Day One index found. Run 'jrnl --index' first to enable link resolution"
     )
@@ -98,6 +101,7 @@ class DayOneIndex:
         config_dir = Path(get_config_path()).parent
         self.index_file = config_dir / "dayone_index.json"
         self.entries: Dict[str, IndexedEntry] = {}
+        self.last_modified: datetime = datetime.min
         self.mode = mode
         self._load_index()
 
@@ -105,6 +109,16 @@ class DayOneIndex:
     def is_usable(self) -> bool:
         """Check if the index is usable"""
         return self.index_file.exists() and len(self.entries) > 0
+
+    def __getitem__(self, uuid: str) -> Optional[IndexedEntry]:
+        """Look up an entry by UUID"""
+        if not self.is_usable and self.mode == IndexMode.USE:
+            print_msg(Message(DayOneIndexMsg.IndexNotUsable, MsgStyle.WARNING))
+            return None
+        return self.entries.get(uuid)
+
+    def __len__(self) -> int:
+        return len(self.entries)
 
     def _load_index(self) -> None:
         """Load existing index if it exists"""
@@ -124,21 +138,37 @@ class DayOneIndex:
                     journal_name=entry["journal_name"],
                     original_journal_name=entry["orignal_journal_name"],
                 )
-                for uuid, entry in data.items()
+                for uuid, entry in data["entries"].items()
             }
-        except Exception:
-            # TODO: add some warning message that something went wrong
-            self.entries = {}
+        except KeyError as e:
+            raise JrnlException(
+                Message(
+                    DayOneIndexMsg.IndexFileMalformed,
+                    MsgStyle.ERROR,
+                    {"error": str(e)},
+                )
+            ) from e
+        except Exception as e:
+            raise JrnlException(
+                Message(
+                    DayOneIndexMsg.IndexLoadError,
+                    MsgStyle.ERROR,
+                    {"error": str(e)},
+                )
+            ) from e
 
     def _save_index(self) -> None:
         """Save index to disk"""
         data = {
-            uuid: {
-                "date": entry.date.isoformat(),
-                "journal_name": entry.journal_name,
-                "orignal_journal_name": entry.original_journal_name,
-            }
-            for uuid, entry in self.entries.items()
+            "last_modified": self.last_modified.isoformat(),
+            "entries": {
+                uuid: {
+                    "date": entry.date.isoformat(),
+                    "journal_name": entry.journal_name,
+                    "orignal_journal_name": entry.original_journal_name,
+                }
+                for uuid, entry in self.entries.items()
+            },
         }
 
         with self.index_file.open("w", encoding="utf-8") as f:
@@ -183,14 +213,19 @@ class DayOneIndex:
             new_entries = True
 
         if new_entries:
+            self.last_modified = datetime.now()
             self._save_index()
 
-    def __getitem__(self, uuid: str) -> Optional[IndexedEntry]:
-        """Look up an entry by UUID"""
-        if not self.is_usable and self.mode == IndexMode.USE:
-            print_msg(Message(DayOneIndexMsg.IndexNotUsable, MsgStyle.WARNING))
-            return None
-        return self.entries.get(uuid)
+    def resolve_links(self, text: str) -> str:
+        """Resolve Day One links in the given text"""
+        link_re = re.compile(r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)")
 
-    def __len__(self) -> int:
-        return len(self.entries)
+        def replace_link(match: re.Match) -> str:
+            link_text, entry_uuid = match.groups()
+
+            if not (target := self[entry_uuid]):
+                return match.group(0)
+
+            return f"[[{target.journal_name}/{target.date:%Y/%m/%d}|{link_text}]]"
+
+        return link_re.sub(replace_link, text)

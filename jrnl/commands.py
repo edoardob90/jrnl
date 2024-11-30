@@ -211,7 +211,7 @@ def postconfig_index(args: argparse.Namespace, config: dict, **kwargs) -> int:
             )
         )
 
-    with open(input_path, "r") as f:
+    with input_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
     if "entries" not in data:
@@ -219,18 +219,11 @@ def postconfig_index(args: argparse.Namespace, config: dict, **kwargs) -> int:
             Message(
                 DayOneMsg.InvalidExport,
                 MsgStyle.ERROR,
-                {"reason": "no.entries found"},
+                {"reason": "no entries found"},
             )
         )
 
-    # Update the index
+    # Update/create the index
     index.add_entries(data["entries"], args.journal_name, input_path)
-
-    msg = (
-        DayOneIndexMsg.IndexCreated
-        if len(index) == len(data["entries"])
-        else DayOneIndexMsg.IndexUpdated
-    )
-    print_msg(Message(msg, MsgStyle.NORMAL, {"count": len(index.entries)}))
 
     return 0

@@ -2,7 +2,6 @@
 # License: https://www.gnu.org/licenses/gpl-3.0.html
 
 import json
-import re
 import textwrap
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +15,9 @@ from jrnl.messages import MsgText
 from jrnl.messages import MsgTextBase
 from jrnl.output import print_msg
 from jrnl.plugins.dayone_index import DayOneIndex
+from jrnl.plugins.dayone_index import DayOneIndexMsg
 from jrnl.plugins.util import localize
+from jrnl.prompt import yesno
 
 if TYPE_CHECKING:
     from jrnl.journals import Journal
@@ -31,6 +32,7 @@ class DayOneMsg(MsgTextBase):
     MediaNotFound = "Media file not found at {path}"
     MediaProcessed = "Successfully processed {count} media files from Day One export"
     ProcessingEntry = "Processing Day One entry {current} of {total}"
+    Continue = "Do you want to continue importing entries from Day One?"
 
 
 class DayOneJSONImporter:
@@ -185,9 +187,6 @@ class DayOneJSONImporter:
                 )
             )
 
-        # Index entries
-        index = DayOneIndex()
-
         # Verify media files exist
         media_types = {"photos": "photos", "pdfAttachments": "pdfs", "audios": "audios"}
         media_count = 0
@@ -218,28 +217,27 @@ class DayOneJSONImporter:
                 )
             )
 
-        old_cnt = len(journal.entries)
-        total_entries = len(data["entries"])
-
         # Setup index for resolving links
-        index = DayOneIndex()
-
-        def resolve_links(text: str) -> str:
-            """Resolve Day One links in the text."""
-            link_re = re.compile(r"\[([^\]]+)\]\(dayone2://view\?Id=([a-zA-Z0-9-]+)\)")
-
-            def replace_link(match: re.Match) -> str:
-                link_text, entry_uuid = match.groups()
-
-                target = index[entry_uuid]
-                if not target:
-                    return match.group(0)
-
-                return f"[[{target.journal_name}/{target.date:%Y/%m/%d}|{link_text}]]"
-
-            return link_re.sub(replace_link, text)
+        try:
+            index = DayOneIndex()
+        except KeyboardInterrupt:
+            print_msg(Message(MsgText.ImportAborted, MsgStyle.WARNING))
+            return None
+        else:
+            # Check if the index is up-to-date
+            if (
+                index.is_usable
+                and index.last_modified.timestamp() < input_path.stat().st_ctime
+            ):
+                print_msg(Message(DayOneIndexMsg.IndexOutdated, MsgStyle.WARNING))
+                proceed = yesno(Message(DayOneMsg.Continue), default=False)
+                if not proceed:
+                    print_msg(Message(MsgText.ImportAborted, MsgStyle.WARNING))
+                    return None
 
         # Process entries with status updates
+        old_cnt = len(journal.entries)
+        total_entries = len(data["entries"])
         entries_text = []
         for i, entry in enumerate(data["entries"], 1):
             print_msg(
@@ -252,12 +250,12 @@ class DayOneJSONImporter:
 
             # Convert entry
             entry_text = DayOneJSONImporter._convert(entry, input_path.parent)
+
             # Resolve any links in the entry
             if entry_text:
-                entry_text = resolve_links(entry_text)
-
-            # Add entry to journal
-            entries_text.append(entry_text)
+                entry_text = index.resolve_links(entry_text)
+                # Add entry to journal
+                entries_text.append(entry_text)
 
         # Import all entries
         journal.import_("\n\n".join(entries_text))

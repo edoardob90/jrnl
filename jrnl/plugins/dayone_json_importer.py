@@ -22,6 +22,30 @@ if TYPE_CHECKING:
     from jrnl.journals import Journal
 
 
+def sanitize_json_text(text: str) -> str:
+    """
+    Cleanup a text string from Day One-specific formatting aberrations
+    """
+    repls = {
+        "\\!": "!",  # Unescape exclamation mark
+        "\\n": "\n",  # Unescape newline
+        "\\.": ".",  # Unescape escaped period
+        "\\": "",  # Remove other escape sequences
+        "\u2028": "\n",  # Replace line separator with newline
+        "\u200b": "",  # Remove zero-width space
+        "\\\\": "\\",  # Replace double backslashes with single
+    }
+
+    # Step 1: normalize text with common replacements
+    for old, new in repls.items():
+        text = text.replace(old, new)
+
+    # Step 2: remove extra triple backticks
+    # TODO
+
+    return text
+
+
 class DayOneMsg(MsgTextBase):
     """Messages specific to Day One import functionality."""
 
@@ -65,11 +89,10 @@ class DayOneJSONImporter:
             date = localize(date, tz)
         date_str = f"[{date.strftime('%Y-%m-%d %H:%M:%S %p')}]"
 
-        # Cleanup entry text from spurious escape sequences
         if text := entry.get("text"):
-            text = text.replace("\\!", "!").replace("\\.", ".").replace("\\n", "\n")
+            text = sanitize_json_text(text)
 
-        # Fetch tags (if any) and add them as the first line
+        # Fetch tags (if any) and add them as the first (title) line
         if tags := entry.get("tags"):
             tags = [(t[0].lower() + t[1:]).replace(" ", "") for t in tags]
             tags_str = " ".join(f"#{tag}" for tag in tags)

@@ -254,7 +254,6 @@ class DayOneJSONImporter:
             # Resolve any links in the entry
             if entry_text:
                 entry_text = index.resolve_links(entry_text)
-                print(entry_text)
                 # Add entry to journal
                 entries_text.append(entry_text)
 
